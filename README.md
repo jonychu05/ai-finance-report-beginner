@@ -52,6 +52,6 @@ Python · Streamlit（网页）· pdfplumber（PDF 解析）· pandas（数据�
 - 项目演示数据使用上市公司公开年报（如贵州茅台 2025 年报），不涉及实习单位内部数据
 - AI 生成内容为初稿，关键数字以人工核对为准——这是本项目的核心原则：**AI 提效，人工兜底**
 
-## 📬 联系
+## 📬 Contact
 
-朱君易 · 金融学本科（2027 届）· 上海 · 邮箱 jonychu05@gmail.com
+Email: jonychu05@gmail.com
