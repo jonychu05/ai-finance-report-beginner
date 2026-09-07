@@ -4,8 +4,19 @@
 
 import re
 
+_YEAR_RE = re.compile(r"^[12][0-9]{3}$")
+
+def _is_year_token(tok):
+    """裸 4 位年份(如 2025/2014)不算金额；带千分位或小数的数字不受影响"""
+    return bool(_YEAR_RE.match(tok.lstrip("-")))
+
 def nums(ln):
-    return [float(x.replace(",", "")) for x in re.findall(r"[-]?[0-9][0-9,\.]*", ln)]
+    out = []
+    for x in re.findall(r"[-]?[0-9][0-9,\.]*", ln):
+        if _is_year_token(x):
+            continue
+        out.append(float(x.replace(",", "")))
+    return out
 
 def find_line(lines, keyword, start=0):
     for i in range(start, len(lines)):
@@ -22,14 +33,16 @@ def _is_toc_line(ln):
 def find_anchor(lines):
     """多锚点：制造业"主要会计数据"、银行"财务概要/财务摘要"；跳过目录"""
     for kw in ["主要会计数据 2025年", "主要会计数据 2024年", "主要会计数据",
-               "主要会计数据和财务指标", "财务概要", "财务摘要"]:
+               "主要会计数据和财务指标", "会计数据及财务指标概要", "会计数据及财务指标",
+               "财务概要", "财务摘要", "财务数据摘要"]:
         for i in range(len(lines)):
             if kw in lines[i] and not _is_toc_line(lines[i]):
                 return i
     return -1
 
-_DISTRACT = ["营业收入", "营业成本", "营业利润", "利润总额", "净利润",
-              "总资产", "总负债", "现金流", "股本"]
+_DISTRACT = ["营业收入", "营业成本", "营业利润", "利润总额", "净利润", "净利润总额",
+              "总资产", "资产总额", "资产合计", "负债", "负债总额", "负债合计",
+              "现金流", "净额", "收入", "支出", "费用", "存款", "贷款", "股本", "少数", "每股"]
 
 def _look_around(lines, i, max_span=3):
     """邻域搜索：先同行，再上一行→下一行交替向外；数字行含其他指标名则跳过"""
@@ -57,10 +70,12 @@ def zone_val(lines, zone, keywords, idx=0, skip_keyword=None, min_val=None):
         if any(kw in lines[i] for kw in keywords):
             if _skip(lines[i], skip_keyword):
                 continue
+            if re.search(r"[0-9][0-9,\.]*\s*[亿万千百]元", lines[i]):
+                continue
             n = _look_around(lines, i)
             if min_val:
                 for x in n:
-                    if x > min_val:
+                    if abs(x) > min_val:
                         return x
                 continue
             if len(n) > idx:
@@ -94,8 +109,8 @@ FEATURES = {
     "归母净利润":   ["归属于", "股东", "净利润"],
     "扣非净利润":   ["扣除非", "净利润"],
     "总资产":       ["资产总额", "总资产", "资产总计"],
-    "总负债":       ["负债总额", "负债合计", "负债总计"],
-    "归母净资产":   ["归属于", "股东", "权益", "净资产"],
+    "总负债":       ["总负债", "负债总额", "负债合计", "负债总计"],
+    "归母净资产":   ["归属于", "股东", "权益", "净资产", "所有者"],
     "总股本":       ["总股本", "股本"],
     "基本每股收益": ["每股收益"],
     "经营现金流净额": ["经营活动", "现金流量", "经营性现金流"],
@@ -118,7 +133,7 @@ def smart_match(lines, zone, key, min_hits=2, min_val=1000):
         if hits >= min_hits and hits > best_hits:
             n = _look_around(lines, i)
             for x in n:
-                if x > min_val:
+                if abs(x) > min_val:
                     best_val, best_hits = x, hits
                     break
     return best_val
@@ -130,33 +145,60 @@ def global_val(lines, keywords, skip_keywords=None, min_val=None):
         if any(kw in ln for kw in keywords):
             if any(sk in ln for sk in skips):
                 continue
+            # 跳过叙事/注释行：数字后紧跟"亿元/万元/百万元"等 → 与主表单位不一致
+            if re.search(r"[0-9][0-9,\.]*\s*[亿万千百]元", ln):
+                continue
             n = nums(ln)
             if n:
                 if min_val:
-                    big = [x for x in n if x > min_val]
+                    big = [x for x in n if abs(x) > min_val]
                     if big:
                         return big[0]
                     continue
                 return n[0]
     return None
 
+def _unit_of(ln):
+    """解析行内单位量词（含繁体）；无 → 1(元)"""
+    if "百万元" in ln or "百萬" in ln:
+        return 1_000_000
+    if "万元" in ln or "萬元" in ln:
+        return 10_000
+    if "千元" in ln or "仟元" in ln:
+        return 1_000
+    return 1
+
 def detect_unit(lines, anchor):
-    """单位自适应：主表附近优先，再全文找 人民币百万元/万元/千元 标注"""
-    def parse(ln):
-        if "百万元" in ln:
-            return 1_000_000
-        if "万元" in ln:
-            return 10_000
-        if "千元" in ln:
-            return 1_000
-        return 1
-    lo, hi = max(0, anchor - 30), min(len(lines), anchor + 40)
+    """单位自适应：主表附近优先；只认带单位量词的行或明确"单位：…元"，
+    跳过"XX贡献单位"这类含"单位"二字的干扰行"""
+    _INLINE = re.compile(r"[（(]\s*(人民币|人民幣)?\s*(百万|百萬|万|萬|千|仟)?元\s*[）)]")
+    lo, hi = max(0, anchor - 30), min(len(lines), anchor + 150)
     for i in range(lo, hi):
-        if "单位" in lines[i]:
-            return parse(lines[i])
+        ln = lines[i]
+        u = _unit_of(ln)
+        if u != 1:
+            if "单位" in ln or "金额单位" in ln or "人民币" in ln or "币种" in ln:
+                return u
+        elif "单位" in ln and "元" in ln:
+            # 明确写了 人民币元/单位：元 → 主表就是元，不再全文找单位，防误乘
+            return 1
+        m = _INLINE.search(ln)
+        if m:
+            # 行内标注：资产总额（元）/（人民币百万元）… 主表区域内的即为权威单位
+            g = m.group(2)
+            if g in ("百万", "百萬"):
+                return 1_000_000
+            if g in ("万", "萬"):
+                return 10_000
+            if g in ("千", "仟"):
+                return 1_000
+            return 1
     for ln in lines:
-        if ("单位" in ln or "金额单位" in ln or "人民币" in ln) and ("百万元" in ln or "万元" in ln or "千元" in ln):
-            return parse(ln)
+        if ("单位" in ln or "金额单位" in ln or "人民币" in ln or "人民幣" in ln) \
+                and ("百万元" in ln or "萬元" in ln or "百萬" in ln or "万元" in ln or "千元" in ln or "仟元" in ln):
+            u = _unit_of(ln)
+            if u != 1:
+                return u
     return 1
 
 def _to_simplified(text):
@@ -184,7 +226,7 @@ def analyze_pdf(file_bytes):
     else:
         end_zone = find_line(lines, "主要财务指标", anchor + 1)
         if end_zone == -1 or end_zone - anchor < 30:
-            end_zone = min(anchor + 60, len(lines))
+            end_zone = min(anchor + 250, len(lines))
         zone = range(anchor, end_zone)
 
     unit = detect_unit(lines, anchor)
@@ -200,28 +242,40 @@ def analyze_pdf(file_bytes):
     D["营业利润"]   = zone_val(lines, zone, ["营业利润"], min_val=MV) \
                       or smart_match(lines, zone, "营业利润") \
                       or global_val(lines, ["营业利润"], skip_keywords=["%"], min_val=MV)
-    D["利润总额"]   = zone_val(lines, zone, ["利润总额", "税前利润"], min_val=MV) \
+    D["利润总额"]   = zone_val(lines, zone, ["利润总额", "税前利润", "税前溢利"], min_val=MV) \
                       or smart_match(lines, zone, "利润总额") \
-                      or global_val(lines, ["利润总额", "税前利润"], skip_keywords=["%"], min_val=MV)
-    D["归母净利润"] = zone_val(lines, zone, ["归属于上市公司股东", "归属于母公司股东", "归属于本行股东"], min_val=MV) \
+                      or global_val(lines, ["利润总额", "税前利润", "税前溢利"], skip_keywords=["%"], min_val=MV)
+    D["归母净利润"] = zone_val(lines, zone, ["归属于上市公司股东", "归属于母公司股东", "归属于本行股东", "拥有人应占", "股东应占",
+                                            "本行权益持有人应占", "本行权益持有人"], min_val=MV) \
                       or smart_match(lines, zone, "归母净利润") \
-                      or global_val(lines, ["归属于上市公司股东的净利润", "归属于母公司股东的净利润", "归属于本行股东的净利润"], min_val=MV)
+                      or global_val(lines, ["归属于上市公司股东的净利润", "归属于母公司股东的净利润", "归属于本行股东的净利润",
+                                            "本公司拥有人应占年内溢利", "拥有人应占年内溢利", "股东应占年内溢利",
+                                            "本行权益持有人应占"], min_val=MV)
     D["扣非净利润"] = zone_val(lines, zone, ["扣除非经常性损益", "扣非净利润", "扣除非"], min_val=MV) or smart_match(lines, zone, "扣非净利润")
-    D["经营现金流净额"] = zone_val(lines, zone, ["经营活动产生的现金", "经营活动现金流量净额", "经营性现金流量"], min_val=MV) \
+    D["经营现金流净额"] = zone_val(lines, zone, ["经营活动产生的现金", "经营活动现金流量净额", "经营性现金流量", "经营活动所得现金净额"], min_val=MV) \
                       or smart_match(lines, zone, "经营现金流净额") \
-                      or global_val(lines, ["经营活动产生的现金流量净额", "经营活动现金流量净额", "经营性现金流量净额"], min_val=MV)
-    D["归母净资产"] = zone_val(lines, zone, ["归属于上市公司股东的净资产", "归属于母公司股东权益", "归属于母公司股东的权益", "归属于本行股东权益",
+                      or global_val(lines, ["经营活动产生的现金流量净额", "经营活动现金流量净额", "经营性现金流量净额",
+                                            "经营活动所得现金净额"], min_val=MV)
+    D["归母净资产"] = zone_val(lines, zone, ["归属于上市公司股东的净资产", "归属于母公司股东权益合计", "归属于母公司股东权益",
+                                           "归属于母公司股东的权益", "归属于母公司股东的所有者", "归属于本行股东权益合计",
+                                           "归属于本行股东权益", "归属于银行股东权益合计", "归属于银行股东权益",
+                                           "本行权益持有人应占权益", "权益持有人应占权益",
                                            "的净资产", "净资产"], skip_keyword=["每股", "净资产收益", "少数"], min_val=MV) \
-                      or zone_val(lines, zone, ["股东权益"], skip_keyword=["每股", "净资产收益", "少数"], min_val=MV) \
+                      or zone_val(lines, zone, ["股东权益"], skip_keyword=["每股", "净资产收益", "少数", "负债"], min_val=MV) \
                       or smart_match(lines, zone, "归母净资产", min_hits=3) \
-                      or global_val(lines, ["归属于上市公司股东的净资产", "归属于母公司股东的权益", "归属于本行股东权益"],
+                      or global_val(lines, ["归属于上市公司股东的净资产", "归属于上市公司股东的所有者权益", "归属于母公司股东权益合计",
+                                            "归属于母公司股东权益", "归属于母公司股东的权益", "归属于母公司股东的所有者权益",
+                                            "归属于本行股东权益合计", "归属于本行股东权益", "归属于银行股东权益合计",
+                                            "归属于银行股东权益", "本公司拥有人应占权益", "拥有人应占权益"],
                                     skip_keywords=["每股", "少数"], min_val=MV)
     D["总资产"]     = zone_val(lines, zone, ["总资产", "资产总额", "资产总计"], min_val=MV) \
                       or smart_match(lines, zone, "总资产") \
                       or global_val(lines, ["总资产", "资产总额", "资产总计"], skip_keywords=["回报率", "比率", "占比"], min_val=MV)
-    D["总负债"]     = zone_val(lines, zone, ["负债总额", "负债合计", "负债总计"], skip_keyword="流动", min_val=MV) \
+    D["总负债"]     = zone_val(lines, zone, ["总负债", "负债总额", "负债合计", "负债总计"],
+                                    skip_keyword=["流动", "金融负债", "权益及", "净负债"], min_val=MV) \
                       or smart_match(lines, zone, "总负债") \
-                      or global_val(lines, ["负债总额", "负债合计", "负债总计"], skip_keywords=["流动"], min_val=MV)
+                      or global_val(lines, ["总负债", "负债总额", "负债合计", "负债总计"],
+                                    skip_keywords=["流动", "金融负债", "权益及", "净负债"], min_val=MV)
     D["总股本"]     = zone_val(lines, zone, ["股本"], min_val=MV) \
                       or smart_match(lines, zone, "总股本") \
                       or global_val(lines, ["总股本", "股本", "股份总数"], skip_keywords=["转增", "变动"], min_val=MV)
@@ -242,6 +296,33 @@ def analyze_pdf(file_bytes):
                     D["基本每股收益"] = float(m.group())
                     break
     D["净利润"] = D["归母净利润"]
+
+    # 兜底校验：宁缺毋错（防跨行串数/假值污染 AI 报告）
+    # 来源感知：主表(zone)里的数通常比全文兜底(global)可靠
+    _rev, _pre, _net = D["营业收入"], D["利润总额"], D["归母净利润"]
+    _net_in_zone = (zone_val(lines, zone, ["归属于上市公司股东", "归属于母公司股东", "归属于本行股东", "拥有人应占", "股东应占",
+                                           "本行权益持有人应占", "本行权益持有人"], min_val=MV) is not None) \
+                   or (smart_match(lines, zone, "归母净利润") is not None)
+    _pre_in_zone = (zone_val(lines, zone, ["利润总额", "税前利润", "税前溢利"], min_val=MV) is not None) \
+                   or (smart_match(lines, zone, "利润总额") is not None)
+    if _pre and _rev and _pre > _rev * 3:      # 利润总额超过营收3倍 → 异常
+        D["利润总额"] = None
+    if _net and _pre and _net > _pre:          # 归母净利润 > 利润总额 → 异常
+        if _net_in_zone and not _pre_in_zone:  # 净利来自主表、利润总额是兜底 → 丢不可靠的利润总额
+            D["利润总额"] = None
+        else:
+            D["归母净利润"] = None
+            D["净利润"] = None
+    elif _net and _rev and _net > _rev * 3:    # 净利率>300% → 异常
+        D["归母净利润"] = None
+        D["净利润"] = None
+
+    # 股本 ≤ 归母净资产（股本面值不可能超过净资产）；经营现金流异常大则丢弃
+    _eq2, _cap, _cfo = D["归母净资产"], D["总股本"], D["经营现金流净额"]
+    if _cap and _eq2 and _cap > _eq2:
+        D["总股本"] = None
+    if _cfo and D["总资产"] and abs(_cfo) > D["总资产"]:
+        D["经营现金流净额"] = None
 
     D["营收同比%"] = zone_pct(lines, zone, ["营业收入"])
     D["净利同比%"] = zone_pct(lines, zone, ["归属于上市公司股东", "归属于母公司股东", "归属于本行股东"])
