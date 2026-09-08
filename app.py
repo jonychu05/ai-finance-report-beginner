@@ -8,115 +8,314 @@ from openai import OpenAI
 from indicators import analyze_pdf, search_keyword
 import plotly.express as px
 import plotly.graph_objects as go
+from hero_ui import render_hero
 
 st.set_page_config(page_title="AI 财报分析工具", page_icon="📊", layout="wide")
 
 st.markdown("""
 <style>
-    /* ===== 隐藏 Streamlit 默认 UI（P0-1） ===== */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stHeader"] {visibility: hidden; height: 0;}
-    .stDeployButton {display: none !important;}
-    #viewerBadge {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
+/* ===== [美化] 全站深色金融科技风 · 全局 ===== */
+/* ===== 隐藏 Streamlit 默认 UI ===== */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+[data-testid="stHeader"] {visibility: hidden; height: 0;}
+.stDeployButton {display: none !important;}
+#viewerBadge {display: none !important;}
+[data-testid="stToolbar"] {display: none !important;}
 
-    /* ===== 品牌配色体系（P0-2）：金融科技风 ===== */
-    :root {
-        --primary: #0958D9;
-        --primary-light: #E6F4FF;
-        --primary-strong: #1677FF;
-        --cyan: #13C2C2;
-        --success: #52C41A;
-        --danger: #F5222D;
-        --warning: #FA8C16;
-        --bg: #F7F8FA;
-        --card-bg: #FFFFFF;
-        --text-1: #1F2329;
-        --text-2: #4E5969;
-        --text-3: #86909C;
-        --border: #E5E8EF;
-    }
-    .stApp {background-color: var(--bg);}
-    h1, h2, h3 {color: var(--text-1);}
+/* ===== 配色令牌（深色金融科技风） ===== */
+:root {
+    --bg-page: #0A0E1A;
+    --bg-card: rgba(255,255,255,.03);
+    --border-card: rgba(255,255,255,.08);
+    --text-1: #E8EAED;
+    --text-2: rgba(255,255,255,.55);
+    --text-3: rgba(255,255,255,.35);
+    --accent: #4A9EFF;
+    --cyan: #13C2C2;
+    --success: #00D68F;
+    --danger: #FF6B6B;
+    --warning: #FADB14;
+    --primary: #4A9EFF;
+    --primary-light: rgba(74,158,255,.12);
+    --primary-strong: #6BB0FF;
+    --card-bg: rgba(255,255,255,.03);
+}
 
-    /* 全局统一：按钮主色 */
-    .stButton > button[kind="primary"] {background-color: var(--primary); border-color: var(--primary);}
-    .stButton > button[kind="primary"]:hover {background-color: var(--primary-strong); border-color: var(--primary-strong);}
-    .stDownloadButton > button {background-color: var(--primary); color: #fff; border-color: var(--primary);}
-    .stDownloadButton > button:hover {background-color: var(--primary-strong);}
-    /* 链接与强调文字 */
-    a {color: var(--primary);}
-    strong {color: var(--text-1);}
+/* ===== 全局背景与文字 ===== */
+.stApp {
+    background:
+        radial-gradient(ellipse at 20% 0%, rgba(74,158,255,.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 100%, rgba(19,194,194,.04) 0%, transparent 50%),
+        #0A0E1A;
+    color: #E8EAED;
+}
+.block-container {padding-top: 0; max-width: 1320px;}
+h1, h2, h3, h4, h5, h6 {color: #E8EAED !important; font-weight: 600; letter-spacing: -0.01em;}
+h2 {border-left: 3px solid #4A9EFF; padding-left: 12px; margin-bottom: 16px !important;}
+h3 {color: rgba(255,255,255,.78) !important; font-size: 16px; font-weight: 600;}
+p, span, li, label, .stMarkdown {color: rgba(255,255,255,.85);}
+.stCaption, [data-testid="stCaptionContainer"] p {color: rgba(255,255,255,.45) !important;}
+strong {color: #E8EAED;}
+a {color: #4A9EFF;}
+code {background: rgba(255,255,255,.06); color: #7CC0FF; border-radius: 4px; padding: 1px 5px;}
 
-    /* ===== 标签语义修正（P0-3）：已选指标 主色浅底+主色字 ===== */
-    span[data-baseweb="tag"] {
-        background-color: var(--primary-light) !important;
-        color: var(--primary) !important;
-        border-radius: 6px !important;
-        border: 1px solid #B7D5FF !important;
-    }
-    span[data-baseweb="tag"] svg {color: var(--primary) !important; width: 14px; height: 14px; cursor: pointer; transition: color .15s ease;}
-    span[data-baseweb="tag"] svg:hover {color: var(--danger) !important;}
+/* ===== 侧边栏 ===== */
+section[data-testid="stSidebar"] {
+    background: rgba(10,14,26,.95) !important;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-right: 1px solid rgba(255,255,255,.06);
+}
+section[data-testid="stSidebar"] .stMarkdown p {color: rgba(255,255,255,.7); font-size: 13px;}
+section[data-testid="stSidebar"] input, section[data-testid="stSidebar"] [data-baseweb="select"] > div {
+    background: rgba(255,255,255,.05) !important;
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 8px !important;
+    color: #E8EAED !important;
+    padding: 8px 12px !important;
+}
+section[data-testid="stSidebar"] input:focus, section[data-testid="stSidebar"] [data-baseweb="select"] > div:focus-within {
+    border-color: #4A9EFF !important;
+    box-shadow: 0 0 0 2px rgba(74,158,255,.15) !important;
+}
+section[data-testid="stSidebar"] h1, section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
+    border-left: none; padding-left: 0; color: #E8EAED !important;
+}
 
-    /* ===== 排版与卡片 ===== */
-    .block-container {padding-top: 1.6rem; max-width: 1280px;}
-    .hero-title {font-size: 2rem; font-weight: 700; color: var(--primary); margin-bottom: .2rem; letter-spacing: -0.5px;}
-    .hero-sub {color: var(--text-3); font-size: .95rem; margin-bottom: .6rem;}
-    .card {background: var(--card-bg); border: 1px solid var(--border); border-radius: 10px; padding: .9rem 1.1rem; box-shadow: 0 1px 3px rgba(31,35,41,.04);}
-    .metric-label {color: var(--text-3); font-size: .78rem;}
-    .metric-value {color: var(--text-1); font-size: 1.3rem; font-weight: 700;}
-    .ok {color: var(--success);} .warn {color: var(--warning);} .err {color: var(--danger);}
-    .footer {color: var(--text-3); font-size: .75rem; text-align: center; margin-top: 2rem;}
-    .feature-tag {display:inline-block; padding:2px 10px; background:var(--primary-light); color:var(--primary); border-radius:12px; font-size:.78rem; margin:2px 4px 2px 0; font-weight:500;}
+/* ===== 按钮 ===== */
+.stButton > button, .stDownloadButton > button {
+    background: linear-gradient(135deg, #4A9EFF 0%, #1677FF 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 10px !important;
+    padding: 8px 20px !important;
+    font-weight: 500 !important;
+    font-size: 14px !important;
+    transition: all .2s ease !important;
+    box-shadow: 0 2px 8px rgba(74,158,255,.25) !important;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+    background: linear-gradient(135deg, #6BB0FF 0%, #4A9EFF 100%) !important;
+    box-shadow: 0 4px 16px rgba(74,158,255,.4) !important;
+    transform: translateY(-1px) !important;
+}
+.stButton > button:active, .stDownloadButton > button:active {transform: translateY(0) !important;}
 
-    /* ===== P1-① 品牌头部导航 + 合规页脚 ===== */
-    .app-header {display:flex; align-items:center; justify-content:space-between; padding:.4rem 0 .8rem; border-bottom:1px solid var(--border); margin-bottom:1rem;}
-    .app-brand {display:flex; align-items:center; gap:10px; font-size:1.05rem; font-weight:700; color:var(--primary);}
-    .brand-logo {width:26px; height:26px; border-radius:6px; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:.85rem;}
-    .app-nav a {color:var(--text-2); text-decoration:none; font-size:.85rem; margin-left:18px; font-weight:500;}
-    .app-nav a:hover {color:var(--primary);}
-    .legal-footer {border-top:1px solid var(--border); margin-top:2rem; padding-top:.8rem; text-align:center; color:var(--text-3); font-size:.75rem; line-height:1.8;}
+/* ===== 上传区 ===== */
+.stFileUploader > div {
+    background: rgba(255,255,255,.03) !important;
+    border: 1.5px dashed rgba(74,158,255,.35) !important;
+    border-radius: 12px !important;
+    padding: 18px !important;
+    transition: all .2s ease !important;
+}
+.stFileUploader > div:hover {border-color: #4A9EFF !important; background: rgba(74,158,255,.05) !important;}
+.stFileUploader [data-testid="stFileUploaderFile"] {
+    background: rgba(255,255,255,.04) !important;
+    border: 1px solid rgba(255,255,255,.08) !important;
+    border-radius: 8px !important;
+    padding: 8px 12px !important;
+    margin-bottom: 6px !important;
+    color: rgba(255,255,255,.85) !important;
+}
 
-    /* ===== P2-e 交互动效 ===== */
-    .card {transition: box-shadow .2s ease, transform .2s ease;}
-    .card:hover {box-shadow: 0 4px 14px rgba(9,88,217,.14); transform: translateY(-1px);}
-    .stButton > button, .stDownloadButton > button {transition: all .18s ease;}
-    .stButton > button:hover, .stDownloadButton > button:hover {box-shadow: 0 2px 8px rgba(9,88,217,.18); transform: translateY(-1px);}
+/* ===== 标签（已选指标） ===== */
+span[data-baseweb="tag"] {
+    background: rgba(74,158,255,.12) !important;
+    color: #4A9EFF !important;
+    border: 1px solid rgba(74,158,255,.25) !important;
+    border-radius: 6px !important;
+    padding: 4px 10px !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+}
+span[data-baseweb="tag"] svg {color: rgba(74,158,255,.6) !important;}
+span[data-baseweb="tag"]:hover {background: rgba(74,158,255,.2) !important;}
 
-    /* ===== P1-⑤ 统一设计语言：圆角/阴影/边框 ===== */
-    .stButton > button, .stDownloadButton > button, .stTextInput input, .stSelectbox div[data-baseweb="select"] > div,
-    .stMultiSelect div[data-baseweb="select"] > div, .stFileUploader > div, .stTextArea textarea {
-        border-radius: 8px !important;
-    }
-    .card {border-radius: 12px; box-shadow: 0 1px 4px rgba(31,35,41,.06);}
-    .stDataFrame {border-radius: 10px; overflow: hidden; border: 1px solid var(--border);}
-    [data-testid="stSidebar"] {border-right: 1px solid var(--border);}
-    [data-testid="stWidgetLabel"] p {font-size: .85rem; color: var(--text-2); font-weight: 500;}
+/* ===== 下拉 / 多选 ===== */
+.stSelectbox [data-baseweb="select"] > div, .stMultiSelect [data-baseweb="select"] > div {
+    background: rgba(255,255,255,.05) !important;
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 8px !important;
+    color: #E8EAED !important;
+}
+.stSelectbox [data-baseweb="select"] > div:hover, .stMultiSelect [data-baseweb="select"] > div:hover {border-color: rgba(74,158,255,.4) !important;}
+.stSelectbox [data-baseweb="select"] input, .stMultiSelect [data-baseweb="select"] input {color: #E8EAED !important;}
+[data-baseweb="popover"] [data-baseweb="menu"], ul[role="listbox"] {
+    background: #141828 !important;
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 8px !important;
+}
+ul[role="listbox"] li {color: rgba(255,255,255,.8) !important; padding: 8px 12px !important;}
+ul[role="listbox"] li[aria-selected="true"] {background: rgba(74,158,255,.15) !important; color: #4A9EFF !important;}
+ul[role="listbox"] li:hover {background: rgba(255,255,255,.05) !important;}
+
+/* ===== 输入框 / 文本框 ===== */
+.stTextInput input, .stTextArea textarea {
+    background: rgba(255,255,255,.05) !important;
+    border: 1px solid rgba(255,255,255,.1) !important;
+    border-radius: 8px !important;
+    color: #E8EAED !important;
+}
+.stTextInput input:focus, .stTextArea textarea:focus {border-color: #4A9EFF !important; box-shadow: 0 0 0 2px rgba(74,158,255,.15) !important;}
+.stTextInput input::placeholder, .stTextArea textarea::placeholder {color: rgba(255,255,255,.3) !important;}
+
+/* ===== Expander ===== */
+.streamlit-expanderHeader {
+    background: rgba(255,255,255,.03) !important;
+    border: 1px solid rgba(255,255,255,.08) !important;
+    border-radius: 10px !important;
+    color: rgba(255,255,255,.8) !important;
+    padding: 12px 16px !important;
+    font-weight: 500 !important;
+}
+.streamlit-expanderContent {
+    background: rgba(255,255,255,.015) !important;
+    border: 1px solid rgba(255,255,255,.05) !important;
+    border-top: none !important;
+    border-radius: 0 0 10px 10px !important;
+    padding: 16px !important;
+}
+
+/* ===== Tabs ===== */
+.stTabs [data-baseweb="tab-list"] {gap: 6px; border-bottom: 1px solid rgba(255,255,255,.08);}
+.stTabs [data-baseweb="tab"] {
+    background: rgba(255,255,255,.03) !important;
+    border-radius: 8px 8px 0 0 !important;
+    color: rgba(255,255,255,.55) !important;
+    padding: 8px 16px !important;
+    font-weight: 500;
+}
+.stTabs [data-baseweb="tab"]:hover {color: #E8EAED !important;}
+.stTabs [aria-selected="true"], .stTabs [data-baseweb="tab"][aria-selected="true"] {
+    background: rgba(74,158,255,.15) !important;
+    color: #4A9EFF !important;
+    border-bottom: 2px solid #4A9EFF;
+}
+
+/* ===== 进度条 / 状态 ===== */
+.stProgress > div > div > div {background: linear-gradient(90deg, #4A9EFF, #13C2C2) !important;}
+.stAlert {border-radius: 10px;}
+[data-testid="stSuccess"] {background: rgba(0,214,143,.08) !important; border: 1px solid rgba(0,214,143,.25) !important; color: #7DF0C7 !important;}
+[data-testid="stWarning"] {background: rgba(250,219,20,.06) !important; border: 1px solid rgba(250,219,20,.22) !important; color: #FBE38E !important;}
+[data-testid="stError"] {background: rgba(255,107,107,.08) !important; border: 1px solid rgba(255,107,107,.25) !important; color: #FFB1B1 !important;}
+[data-testid="stInfo"] {background: rgba(74,158,255,.08) !important; border: 1px solid rgba(74,158,255,.22) !important; color: #A8CFFF !important;}
+
+/* ===== 滚动条 ===== */
+::-webkit-scrollbar {width: 8px; height: 8px;}
+::-webkit-scrollbar-track {background: rgba(255,255,255,.02);}
+::-webkit-scrollbar-thumb {background: rgba(255,255,255,.15); border-radius: 4px;}
+::-webkit-scrollbar-thumb:hover {background: rgba(255,255,255,.25);}
+
+/* ===== 模块卡片 ===== */
+.module-card {
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px;
+    padding: 18px 22px;
+    margin-bottom: 16px;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    transition: border-color .2s ease;
+}
+.module-card:hover {border-color: rgba(74,158,255,.2);}
+.module-card > .stMarkdown h3:first-child, .module-card h3:first-child {margin-top: 0;}
+
+/* ===== 兼容旧 .card 内容卡片（深色化） ===== */
+.card {
+    background: rgba(255,255,255,.03);
+    border: 1px solid rgba(255,255,255,.08);
+    border-radius: 12px;
+    padding: .9rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
+    transition: box-shadow .2s ease, transform .2s ease, border-color .2s ease;
+}
+.card:hover {border-color: rgba(74,158,255,.25); box-shadow: 0 4px 14px rgba(0,0,0,.35); transform: translateY(-1px);}
+.metric-label {color: rgba(255,255,255,.45); font-size: .78rem;}
+.metric-value {color: #E8EAED; font-size: 1.3rem; font-weight: 700; font-family: 'SF Mono','Fira Code','Consolas',monospace;}
+.ok {color: #00D68F;} .warn {color: #FADB14;} .err {color: #FF6B6B;}
+.legal-footer {border-top: 1px solid rgba(255,255,255,.06); margin-top: 1.6rem; padding-top: .9rem; text-align: center; color: rgba(255,255,255,.3); font-size: .75rem; line-height: 1.8;}
+.feature-tag {display:inline-block; padding: 2px 10px; background: rgba(74,158,255,.12); color: #4A9EFF; border: 1px solid rgba(74,158,255,.2); border-radius: 12px; font-size: .78rem; margin: 2px 4px 2px 0; font-weight: 500;}
+
+/* ===== 表格深色 ===== */
+.stDataFrame {
+    border-radius: 10px; overflow: hidden;
+    border: 1px solid rgba(255,255,255,.08);
+    background: transparent;
+}
+.stDataFrame [data-testid="stDataFrameResizable"], .stDataFrame [data-testid="stElementToolbarButton"] {background: transparent !important;}
+.stDataFrame thead tr th {
+    background: rgba(255,255,255,.06) !important;
+    color: rgba(255,255,255,.9) !important;
+    font-weight: 600 !important;
+    font-size: 12px !important;
+    padding: 10px 12px !important;
+    border-bottom: 1px solid rgba(255,255,255,.1) !important;
+    white-space: nowrap;
+}
+.stDataFrame tbody tr td {
+    background: transparent !important;
+    color: rgba(255,255,255,.8) !important;
+    font-size: 13px !important;
+    padding: 9px 12px !important;
+    border-bottom: 1px solid rgba(255,255,255,.04) !important;
+    font-family: 'SF Mono','Fira Code','Consolas',monospace;
+}
+.stDataFrame tbody tr:nth-child(even) td {background: rgba(255,255,255,.015) !important;}
+.stDataFrame tbody tr:hover td {background: rgba(74,158,255,.08) !important;}
+.stDataFrame tbody tr td:first-child {
+    color: #E8EAED !important;
+    font-weight: 600 !important;
+    font-family: -apple-system,'PingFang SC',sans-serif;
+    background: rgba(255,255,255,.02) !important;
+    text-align: left !important;
+}
+.stDataFrame tbody tr td:not(:first-child) {text-align: right !important; font-variant-numeric: tabular-nums;}
+.stDataFrame [data-testid="stDataFrameSortIcon"] {color: rgba(255,255,255,.4) !important;}
+.stDataFrame [data-testid="stDataFrameToolbar"] button {background: transparent !important; color: rgba(255,255,255,.6) !important;}
+
+/* ===== 上传区内部 dropzone 深色化（修复按钮看不见） ===== */
+[data-testid="stFileUploaderDropzone"] {
+    background: rgba(255,255,255,.03) !important;
+    border-radius: 12px !important;
+    color: rgba(255,255,255,.85) !important;
+}
+[data-testid="stFileUploaderDropzone"] button,
+[data-testid="stFileUploaderDropzone"] [role="button"] {
+    background: linear-gradient(135deg, #4A9EFF 0%, #1677FF 100%) !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 500 !important;
+    padding: 6px 18px !important;
+    box-shadow: 0 2px 8px rgba(74,158,255,.25) !important;
+}
+[data-testid="stFileUploaderDropzone"] button:hover {
+    background: linear-gradient(135deg, #6BB0FF 0%, #4A9EFF 100%) !important;
+}
+[data-testid="stFileUploaderDropzone"] small,
+[data-testid="stFileUploaderDropzone"] span {
+    color: rgba(255,255,255,.6) !important;
+}
+
+/* ===== 图表容器 ===== */
+.stPlotlyChart {
+    background: rgba(255,255,255,.02);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: 12px;
+    padding: 8px;
+    margin-bottom: 12px;
+}
+.stPlotlyChart .modebar {background: transparent !important;}
+
+/* ===== 指标数值/文案辅助色 ===== */
+[data-testid="stMetricValue"], .stMetricValue {color: #E8EAED;}
+[data-testid="stWidgetLabel"] p {color: rgba(255,255,255,.6) !important; font-weight: 500;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('''
-<div class="app-header">
-  <div class="app-brand"><span class="brand-logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="4" y1="20" x2="4" y2="12"/><line x1="10" y1="20" x2="10" y2="5"/><line x1="16" y1="20" x2="16" y2="14"/><line x1="22" y1="20" x2="22" y2="9"/></svg></span> AI 财报分析工具</div>
-  <div class="app-nav">
-    <a href="#" onclick="return false;">单份分析</a>
-    <a href="#" onclick="return false;">多年报对标</a>
-    <a href="https://github.com/jonychu05/ai-finance-report-beginner" target="_blank">GitHub</a>
-  </div>
-</div>
-''', unsafe_allow_html=True)
-
-st.markdown('<div class="hero-title">AI 财报分析工具</div>', unsafe_allow_html=True)
-st.markdown('<div class="hero-sub">上市年报 AI 解析 · 指标提取 · 勾稽校验 · 多年报对标 · 一键导出</div>', unsafe_allow_html=True)
-st.markdown('<div>'
-            '<span class="feature-tag">20+ 核心指标</span>'
-            '<span class="feature-tag">勾稽自检</span>'
-            '<span class="feature-tag">关键词搜索</span>'
-            '<span class="feature-tag">多年报对比</span>'
-            '<span class="feature-tag">报告导出</span>'
-            '<span class="feature-tag">多模型支持</span>'
-            '</div>', unsafe_allow_html=True)
+render_hero()
 
 MODEL_PROVIDERS = {
     "DeepSeek 深度求索": {"base_url": "https://api.deepseek.com", "model": "deepseek-chat"},
@@ -128,7 +327,17 @@ MODEL_PROVIDERS = {
 }
 
 with st.sidebar:
-    st.markdown("### 配置")
+    # [美化] 侧边栏：产品标识
+    st.markdown('''<div style="padding:6px 0 14px 0;border-bottom:1px solid rgba(255,255,255,.06);margin-bottom:14px;">
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <div style="width:32px;height:32px;background:linear-gradient(135deg,#4A9EFF,#13C2C2);border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:14px;">财</div>
+                  <div>
+                    <div style="color:#E8EAED;font-size:15px;font-weight:600;">AI 财报分析</div>
+                    <div style="color:rgba(255,255,255,.4);font-size:11px;">深色主题 · v1.5</div>
+                  </div>
+                </div></div>''', unsafe_allow_html=True)
+
+    st.markdown('<p style="color:rgba(255,255,255,.4);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">⚙️ 配置</p>', unsafe_allow_html=True)
     provider_name = st.selectbox("模型供应商", list(MODEL_PROVIDERS.keys()), key="provider")
     provider = MODEL_PROVIDERS[provider_name]
     api_key = st.text_input(f"{provider_name} API Key", type="password",
@@ -136,12 +345,19 @@ with st.sidebar:
     model_name = st.text_input("模型名称", value=provider["model"], key="model_name")
     base_url = provider["base_url"]
 
-    st.markdown("---")
-    st.markdown("### 图表设置")
+    st.markdown('<div style="height:1px;background:rgba(255,255,255,.06);margin:14px 0;"></div>', unsafe_allow_html=True)
+    st.markdown('<p style="color:rgba(255,255,255,.4);font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">📊 显示设置</p>', unsafe_allow_html=True)
     preset = st.selectbox("指标预设方案", ["综合对标", "盈利能力", "偿债风险", "现金流质量"], key="preset")
 
+    st.markdown('''<div style="margin-top:18px;border-top:1px solid rgba(255,255,255,.06);padding-top:12px;">
+                <p style="color:rgba(255,255,255,.28);font-size:11px;line-height:1.7;">数据仅本地处理 · AI 初稿需人工复核<br>演示数据来自上市公司公开年报</p></div>''', unsafe_allow_html=True)
+
+
 # ================= 页面 =================
+st.markdown('<div id="upload-anchor" style="scroll-margin-top:12px"></div>', unsafe_allow_html=True)
+st.markdown('<div class="module-card">', unsafe_allow_html=True)
 uploaded = st.file_uploader("上传年报 PDF（可多选，≥2 份进入对比模式）", type=["pdf"], accept_multiple_files=True)
+st.markdown('</div>', unsafe_allow_html=True)
 
 # ============ 指标标签 ============
 LABELS = ["营业收入", "营业成本", "营业利润", "利润总额", "净利润", "归母净利润", "扣非净利润",
@@ -154,45 +370,81 @@ RATIO_KEYS = {"毛利率%", "净利率%", "ROE%", "资产负债率%", "流动比
 PERCENT_COLS = {"毛利率%", "净利率%", "ROE%", "资产负债率%", "营收同比%", "净利同比%"}
 
 def fmt_styler(df):
-    """对比表样式：千分位 + 百分比 + 条件格式（P1-③④）"""
+    """[美化] 对比表深色样式：千分位 + 百分比 + 深色条件格式（同比正绿负红 / 列最大高亮 / 异常警示）"""
     fmt = {}
     for col in df.columns:
         if col in PERCENT_COLS:
             fmt[col] = lambda x: f"{x:.2f}%" if pd.notna(x) else "—"
-        elif col in AMOUNT_KEYS:
-            fmt[col] = lambda x: f"{x:,.2f}" if pd.notna(x) else "—"
         else:
             fmt[col] = lambda x: f"{x:,.2f}" if pd.notna(x) else "—"
     styler = df.style.format(fmt)
 
-    # 每列最大值浅蓝高亮（axis=0 按列）
+    # 每列最大值：高亮为品牌蓝（公司×指标，按列比较）
     num_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and df[c].notna().any()]
-    if num_cols:
-        styler = styler.highlight_max(subset=num_cols, color="#E6F4FF", axis=0)
+    def _max_style(v, col):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return ""
+        try:
+            mx = df[col].max()
+        except Exception:
+            return ""
+        if v == mx:
+            return "color:#4A9EFF;font-weight:700;background-color:rgba(74,158,255,.10);"
+        return ""
+    for col in num_cols:
+        styler = styler.map(lambda v, col=col: _max_style(v, col), subset=[col])
 
-    # 同比红绿：正红（涨）负绿（跌），A股惯例
+    # 同比列：正绿负红（深色主题）
     def _yoy(v):
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return ""
         if v > 0:
-            return "color:#F5222D;font-weight:600;"
+            return "color:#00D68F;font-weight:600;"
         if v < 0:
-            return "color:#52C41A;font-weight:600;"
-        return ""
-    # 异常区间高亮（财务合理性检查）
+            return "color:#FF6B6B;font-weight:600;"
+        return "color:#E8EAED;"
+    for col in ["营收同比%", "净利同比%"]:
+        if col in df.columns:
+            styler = styler.map(_yoy, subset=[col])
+
+    # 异常区间警示（财务合理性检查）
     def _range(v, lo, hi):
         if v is None or (isinstance(v, float) and pd.isna(v)):
             return ""
         if not (lo <= v <= hi):
-            return "background-color:#FFF7E6;color:#D46B08;"
+            return "background-color:rgba(250,219,20,.10);color:#FADB14;font-weight:600;"
         return ""
-    for col in ["营收同比%", "净利同比%"]:
-        if col in df.columns:
-            styler = styler.map(_yoy, subset=[col])
-    for col, lo, hi in [("毛利率%", 0, 100), ("净利率%", -100, 100), ("资产负债率%", 0, 100)]:
+    for col, lo, hi in [("毛利率%", 0, 100), ("净利率%", -100, 100)]:
         if col in df.columns:
             styler = styler.map(lambda v, lo=lo, hi=hi: _range(v, lo, hi), subset=[col])
+
+    # 资产负债率 > 70% 预警高亮
+    if "资产负债率%" in df.columns:
+        styler = styler.map(lambda v: ("background-color:rgba(250,219,20,.10);color:#FADB14;font-weight:600;"
+                                       if (pd.notna(v) and v > 70) else ""),
+                            subset=["资产负债率%"])
+
+    # 表头/表体深色基础样式
+    styler = styler.set_table_styles([
+        {"selector": "th", "props": [("background-color", "rgba(255,255,255,.06)"),
+                                     ("color", "rgba(255,255,255,.9)"),
+                                     ("font-weight", "600"), ("font-size", "12px"),
+                                     ("padding", "10px 12px"),
+                                     ("border-bottom", "1px solid rgba(255,255,255,.1)"),
+                                     ("text-align", "left")]},
+        {"selector": "td", "props": [("color", "rgba(255,255,255,.8)"), ("font-size", "13px"),
+                                     ("padding", "9px 12px"),
+                                     ("border-bottom", "1px solid rgba(255,255,255,.04)"),
+                                     ("font-family", "'SF Mono','Fira Code','Consolas',monospace")]},
+        {"selector": "td:first-child", "props": [("color", "#E8EAED"), ("font-weight", "600"),
+                                                 ("font-family", "-apple-system,'PingFang SC',sans-serif"),
+                                                 ("text-align", "left")]},
+        {"selector": "td:not(:first-child)", "props": [("text-align", "right"),
+                                                       ("font-variant-numeric", "tabular-nums")]},
+        {"selector": "tr:nth-child(even) td", "props": [("background-color", "rgba(255,255,255,.015)")]},
+    ])
     return styler
+
 
 def fmt_single_df(df):
     """单份指标表：金额转亿+千分位、比率加%，避免科学计数法"""
@@ -249,20 +501,52 @@ PRESET_KEYS = {
     "偿债风险": ["总资产", "总负债", "资产负债率%", "流动比率"],
     "现金流质量": ["经营现金流净额", "净利润", "营业收入"],
 }
+def apply_dark_theme(fig, height=None):
+    """[美化] 给 Plotly 图表应用统一深色金融科技主题"""
+    layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,255,255,0.02)",
+        font=dict(family="-apple-system,'Segoe UI','PingFang SC',sans-serif", size=12,
+                  color="rgba(255,255,255,.7)"),
+        margin=dict(l=16, r=16, t=40, b=16),
+        title=dict(font=dict(size=15, color="#E8EAED"), x=0.02, xanchor="left"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                    font=dict(size=11, color="rgba(255,255,255,.6)"), bgcolor="rgba(0,0,0,0)"),
+        hoverlabel=dict(bgcolor="rgba(20,24,40,.95)", bordercolor="rgba(255,255,255,.1)",
+                        font=dict(size=12, color="#E8EAED")),
+    )
+    if height:
+        layout["height"] = height
+    fig.update_layout(**layout)
+    try:
+        if "xaxis" in fig.layout:
+            fig.update_xaxes(gridcolor="rgba(255,255,255,.05)", linecolor="rgba(255,255,255,.1)",
+                             tickfont=dict(size=11, color="rgba(255,255,255,.5)"))
+        if "yaxis" in fig.layout:
+            fig.update_yaxes(gridcolor="rgba(255,255,255,.05)", linecolor="rgba(255,255,255,.1)",
+                             tickfont=dict(size=11, color="rgba(255,255,255,.5)"))
+    except Exception:
+        pass
+    return fig
+
 
 if not uploaded:
     # P2-a：首页引导区 + 空状态
+    st.markdown('<div id="usage" style="scroll-margin-top:12px"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="module-card">', unsafe_allow_html=True)
     st.markdown("### 三步完成一份年报分析")
     c1, c2, c3 = st.columns(3)
     for col, (t, d, c) in zip([c1, c2, c3], [
-        ("1️⃣ 上传年报", "拖入上市公司年报 PDF，可多选；支持制造业、银行等格式", "#0958D9"),
+        ("1️⃣ 上传年报", "拖入上市公司年报 PDF，可多选；支持制造业、银行等格式", "#4A9EFF"),
         ("2️⃣ AI 提取与校验", "自动提取 20+ 指标、勾稽自检、任意关键词全文搜索", "#13C2C2"),
-        ("3️⃣ 对比与导出", "多年报对标 + 按指标自动选图，报告/数据一键导出", "#722ED1")]):
+        ("3️⃣ 对比与导出", "多年报对标 + 按指标自动选图，报告/数据一键导出", "#A78BFA")]):
         col.markdown(f'<div class="card" style="border-top:3px solid {c}">'
                      f'<div style="font-weight:700;margin-bottom:6px;color:var(--text-1)">{t}</div>'
                      f'<div style="color:var(--text-2);font-size:.85rem;line-height:1.6">{d}</div></div>',
                      unsafe_allow_html=True)
 
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('<div class="module-card">', unsafe_allow_html=True)
     st.markdown("### 核心能力")
     feat_rows = [
         [("20+ 指标自动提取", "单位自适应 · 繁体转简体 · 制造业/银行通吃"), ("任意指标全文搜索", "关键词即查 · 返回原文 + 行号")],
@@ -277,6 +561,8 @@ if not uploaded:
                     f'<div style="color:var(--text-2);font-size:.82rem;line-height:1.6">{d2}</div></div>', unsafe_allow_html=True)
     st.markdown('<div style="text-align:center;color:var(--text-3);font-size:.85rem;margin:.6rem 0 1.2rem">'
                 '上传 1 份 = 单份深度分析 ｜ 上传 ≥2 份 = 多年报对标</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if uploaded:
     if len(uploaded) == 1:
@@ -298,12 +584,15 @@ if uploaded:
                          unsafe_allow_html=True)
     
         # 勾稽自检
+        st.markdown('<div class="module-card">', unsafe_allow_html=True)
         st.markdown("### 勾稽自检")
         for desc, val, status in checks:
             icon = {"ok": "✅", "warn": "⚠️", "err": "❌"}[status]
             st.markdown(f"{icon} **{desc}**：{val:.2f}")
     
         # 20 指标表格
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('<div class="module-card">', unsafe_allow_html=True)
         st.markdown("### 20 项指标明细")
         labels = ["营业收入", "营业成本", "营业利润", "利润总额", "净利润", "归母净利润", "扣非净利润",
                   "总资产", "总负债", "归母净资产", "少数股东权益", "总股本", "流动资产", "流动负债","货币资金",
@@ -319,6 +608,7 @@ if uploaded:
         st.download_button("导出指标数据（CSV）", csv_bytes, file_name="财务指标明细.csv",
                            mime="text/csv", key="dl_csv", on_click=_mark_dl, args=("✅ 指标数据已导出",))
 
+        st.markdown('</div>', unsafe_allow_html=True)
         # 人工补充（覆盖率的兜底）
         if missing:
             st.markdown("### 人工补充缺失指标")
@@ -335,6 +625,7 @@ if uploaded:
                 st.success("已更新，生成报告时将使用补充后的数据")
     
         # 自定义指标搜索（台阶 4.7）
+        st.markdown('<div class="module-card">', unsafe_allow_html=True)
         st.markdown("### 自定义指标搜索")
         kw = st.text_input("输入任意指标关键词，引擎在全文检索并返回数值（如：研发费用、存货、应收账款、利息收入）",
                            placeholder="例如：研发费用", key="kw_search")
@@ -359,7 +650,9 @@ if uploaded:
                 else:
                     st.markdown("没有找到相似表述。建议：换更简短的关键词，或在年报目录中确认该指标的标准叫法后再搜。")
     
+        st.markdown('</div>', unsafe_allow_html=True)
         # AI 报告（台阶4.9：资深专家模式 + 防臆造 + 导出）
+        st.markdown('<div class="module-card">', unsafe_allow_html=True)
         st.markdown("### AI 分析报告")
         if st.button("生成 AI 分析报告（资深专家模式）", type="primary", use_container_width=True):
             if not api_key:
@@ -393,7 +686,8 @@ if uploaded:
                                            file_name="AI财报分析报告.md", mime="text/markdown", key="dl_report", on_click=_mark_dl, args=("✅ 分析报告已导出",))
                     except Exception as e:
                         st.error(f"调用 AI 失败：{e}")
-    
+            st.markdown('</div>', unsafe_allow_html=True)
+
     else:
         # ============ 台阶 4.8：多年报对比 + 自动选图 ============
         st.markdown("### 多份年报对比（台阶 4.8）")
@@ -414,6 +708,7 @@ if uploaded:
             st.warning("没有成功提取到任何年报，请检查文件是否为有效 PDF")
         else:
             # 覆盖率汇总
+            st.markdown('<div class="module-card">', unsafe_allow_html=True)
             st.markdown("#### 提取覆盖率")
             cov_rows = []
             for r in records:
@@ -422,7 +717,9 @@ if uploaded:
                                  "缺失": "、".join([k for k in LABELS if r["D"].get(k) is None]) or "无"})
             st.dataframe(pd.DataFrame(cov_rows), use_container_width=True, hide_index=True)
 
+            st.markdown('</div>', unsafe_allow_html=True)
             # 对比表格（公司 × 指标，金额转亿）
+            st.markdown('<div class="module-card">', unsafe_allow_html=True)
             st.markdown("#### 指标对比明细（金额单位：亿元）")
             df_cmp = pd.DataFrame({r["file"]: [fmt_val(r["D"].get(k), k) for k in LABELS] for r in records},
                                   index=LABELS).T
@@ -448,7 +745,9 @@ if uploaded:
             st.download_button("导出对比数据（CSV）", csv_cmp, file_name="多年报指标对比.csv",
                                mime="text/csv", key="dl_cmp_csv", on_click=_mark_dl, args=("✅ 对比数据已导出",))
 
+            st.markdown('</div>', unsafe_allow_html=True)
             # 指标多选 + 图表（台阶4.8优化版：Plotly + 多图表类型 + Excel简洁风）
+            st.markdown('<div class="module-card">', unsafe_allow_html=True)
             st.markdown("#### 指标对比图表")
             default_keys = [k for k in PRESET_KEYS.get(preset, PRESET_KEYS["综合对标"]) if k in LABELS]
             sel_keys = st.multiselect("选择要对比的指标（柱状/条形/折线按每个指标出图；饼图/圆环/直方图取第一个指标；散点图需另选X/Y）",
@@ -464,7 +763,7 @@ if uploaded:
             clean_df.index = [clean_name(x) for x in df_cmp.index]
 
             # 多公司固定区分色板（P0-5）：与品牌色一致，所有图表统一
-            COMPANY_PALETTE = ["#0958D9", "#13C2C2", "#722ED1", "#FA8C16", "#52C41A", "#EB2F96", "#2F54EB", "#F5222D"]
+            COMPANY_PALETTE = ["#4A9EFF", "#13C2C2", "#FA8C16", "#00D68F", "#FF6B6B", "#FADB14", "#A78BFA", "#F472B6"]
             cmap = {name: COMPANY_PALETTE[i % len(COMPANY_PALETTE)] for i, name in enumerate(clean_df.index)}
 
             def render_bar(key, horizontal=False):
@@ -478,7 +777,7 @@ if uploaded:
                                  color_discrete_map=cmap)
                     fig.update_traces(texttemplate='%{x:,.2f}', textposition='outside', width=0.55,
                                       textfont=dict(size=10))
-                    fig.update_layout(template="plotly_white", height=340, showlegend=True,
+                    fig.update_layout(height=340, showlegend=True,
                                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                                       xaxis_title="", xaxis=dict(ticksuffix=unit_txt),
                                       margin=dict(l=10, r=20, t=55, b=10))
@@ -487,11 +786,12 @@ if uploaded:
                                  color_discrete_map=cmap)
                     fig.update_traces(texttemplate='%{y:,.2f}', textposition='outside', width=0.55,
                                       textfont=dict(size=10))
-                    fig.update_layout(template="plotly_white", xaxis_tickangle=0, height=340, showlegend=True,
+                    fig.update_layout(xaxis_tickangle=0, height=340, showlegend=True,
                                       legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
                                       yaxis_title="", yaxis=dict(ticksuffix=unit_txt),
                                       xaxis_title="", hovermode="x unified",
                                       margin=dict(l=10, r=10, t=55, b=10))
+                apply_dark_theme(fig)
                 st.plotly_chart(fig, use_container_width=True)
                 return True
 
@@ -505,7 +805,8 @@ if uploaded:
                     fig = px.scatter(d, x=xk, y=yk, color=d.index, text=d.index, title=f"{xk} vs {yk} 相关关系",
                                      color_discrete_map=cmap)
                     fig.update_traces(textposition="top center")
-                    fig.update_layout(template="plotly_white", height=420, showlegend=True)
+                    fig.update_layout(height=420, showlegend=True)
+                    apply_dark_theme(fig)
                     st.plotly_chart(fig, use_container_width=True)
             elif chart_mode == "雷达图（财务画像）":
                 radar_keys = [k for k in ["毛利率%", "净利率%", "ROE%", "资产负债率%", "营收同比%"] if k in LABELS]
@@ -532,20 +833,22 @@ if uploaded:
                             norm.append(100 if hi == lo else (vals[i] - lo) / (hi - lo) * 100)
                         fig.add_trace(go.Scatterpolar(r=norm, theta=radar_keys, fill="toself",
                                                       name=comp, opacity=0.5,
-                                                      line_color=cmap.get(comp, "#0958D9")))
-                    fig.update_layout(template="plotly_white", height=460, showlegend=True,
+                                                      line_color=cmap.get(comp, "#4A9EFF")))
+                    fig.update_layout(height=460, showlegend=True,
                                       title="财务能力画像（雷达图 · 相对水平）",
                                       polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
+                    apply_dark_theme(fig)
                     st.plotly_chart(fig, use_container_width=True)
             elif chart_mode == "热力图（指标矩阵）":
                 hm_cols = [c for c in LABELS if c in clean_df.columns]
                 d = clean_df[hm_cols]
                 norm = (d - d.min()) / (d.max() - d.min())
                 fig = px.imshow(norm, x=hm_cols, y=d.index, aspect="auto",
-                                color_continuous_scale=["#E6F4FF", "#FFFFFF", "#0958D9"],
+                                color_continuous_scale=["#0A0E1A", "#1B4F9E", "#4A9EFF"],
                                 title="指标矩阵热力图（按列归一化 0-1，蓝深=相对更高）")
-                fig.update_layout(template="plotly_white", height=460, margin=dict(l=10, r=10, t=50, b=10))
+                fig.update_layout(height=460, margin=dict(l=10, r=10, t=50, b=10))
                 fig.update_xaxes(tickangle=45)
+                apply_dark_theme(fig)
                 st.plotly_chart(fig, use_container_width=True)
             elif chart_mode == "股价图":
                 st.info("股价图（K线）需要多期行情的开盘/收盘/最高/最低数据，当前为年报指标对比数据暂不适用；已用折线图展示指标趋势。")
@@ -556,11 +859,12 @@ if uploaded:
                         if not d.empty:
                             u2 = "%" if key in PERCENT_COLS else ("亿元" if key in AMOUNT_KEYS else "")
                             fig = px.line(d, x=d.index, y=key, markers=True, title=f"{key} 趋势" + (f"（{u2}）" if u2 else ""))
-                            fig.update_traces(line_color="#0958D9",
-                                              marker=dict(color=[cmap.get(n, "#0958D9") for n in d.index], size=8))
-                            fig.update_layout(template="plotly_white", height=340, xaxis_tickangle=0,
+                            fig.update_traces(line_color="#4A9EFF",
+                                              marker=dict(color=[cmap.get(n, "#4A9EFF") for n in d.index], size=8))
+                            fig.update_layout(height=340, xaxis_tickangle=0,
                                               hovermode="x unified", yaxis=dict(ticksuffix=u2),
                                               margin=dict(l=10, r=10, t=45, b=10))
+                            apply_dark_theme(fig)
                             st.plotly_chart(fig, use_container_width=True)
             elif chart_mode in ("饼图（占比）", "圆环图（占比）", "直方图（分布）"):
                 key = sel_keys[0] if sel_keys else None
@@ -575,15 +879,17 @@ if uploaded:
                                      hole=(0.5 if "圆环" in chart_mode else 0), title=f"{key} 占比分布",
                                      color_discrete_map=cmap)
                         fig.update_traces(textinfo="label+percent", textposition="inside")
-                        fig.update_layout(template="plotly_white", height=360, showlegend=True,
+                        fig.update_layout(height=360, showlegend=True,
                                           margin=dict(l=10, r=10, t=45, b=10))
                         col_mid = st.columns([1, 2, 1])[1]
                         with col_mid:
+                            apply_dark_theme(fig)
                             st.plotly_chart(fig, use_container_width=True)
                     else:
                         fig = px.histogram(d, x=key, nbins=8, title=f"{key} 分布",
                                            color=d.index, color_discrete_map=cmap)
-                        fig.update_layout(template="plotly_white", height=380)
+                        fig.update_layout(height=380)
+                        apply_dark_theme(fig)
                         st.plotly_chart(fig, use_container_width=True)
             else:
                 if not sel_keys:
@@ -600,16 +906,19 @@ if uploaded:
                                     continue
                                 u3 = "%" if key in PERCENT_COLS else ("亿元" if key in AMOUNT_KEYS else "")
                                 fig = px.line(d, x=d.index, y=key, markers=True, title=f"{key}" + (f"（{u3}）" if u3 else ""))
-                                fig.update_traces(line_color="#0958D9",
-                                                  marker=dict(color=[cmap.get(n, "#0958D9") for n in d.index], size=8))
-                                fig.update_layout(template="plotly_white", xaxis_tickangle=0, height=340,
+                                fig.update_traces(line_color="#4A9EFF",
+                                                  marker=dict(color=[cmap.get(n, "#4A9EFF") for n in d.index], size=8))
+                                fig.update_layout(xaxis_tickangle=0, height=340,
                                                   xaxis_title="", yaxis_title="", yaxis=dict(ticksuffix=u3),
                                                   hovermode="x unified",
                                                   margin=dict(l=10, r=10, t=45, b=10))
+                                apply_dark_theme(fig)
                                 st.plotly_chart(fig, use_container_width=True)
                             else:
                                 if not render_bar(key, horizontal=horizontal):
                                     st.markdown(f"**{key}**：多家均未提取到，跳过")
+
+            st.markdown('</div>', unsafe_allow_html=True)
 
 if st.session_state.get("_dl_msg"):
     st.toast(st.session_state.pop("_dl_msg"))
